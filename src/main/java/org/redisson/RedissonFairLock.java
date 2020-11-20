@@ -110,11 +110,19 @@ public class RedissonFairLock extends RedissonLock implements RLock {
                         "return 1;", 
                     Arrays.<Object>asList(getName(), getThreadsQueueName(), getThreadElementName(threadId)), internalLockLeaseTime, getLockName(threadId));
         }
-        
+
+        // 公平锁源码入口
         if (command == RedisCommands.EVAL_LONG) {
             return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, command,
                     // remove stale threads
+                    // 1. 第一次，如果某个锁，没有人加锁，此时第一个客户端进来，先进入一个死循环
+                    // 2. 第二个客户端进来尝试加锁，进入死循环中
+                    // 3. 第三个客户端过来加锁，进入while true 的死循环当中
                     "while true do "
+                    // 1. 第一次进来，这个lindex redisson_lock_queue:{anyLock} 0 的命令就是说，从 redisson_lock_queue:{lock}这个队列中弹出第一个元素，刚开始，肯定是空的，什么都没有，直接就会直接
+                    // break掉，跳出死循环
+                    // 2. 第二个客户端首先执行 lindex redisson_lock_queue:{anyLock} 0,取出队列的第一个元素，此时该队列还是空的，然后break掉，跳出死循环
+                    // 3. lindex redisson_lock_queue:{anyLock} 0,取出队列的第一个元素，此时，这个队列中由于第二个客户端已经将数据插入到队列中，已经在排队了，所以值是有的firstThreadId2=10:00:25
                     + "local firstThreadId2 = redis.call('lindex', KEYS[2], 0);"
                     + "if firstThreadId2 == false then "
                         + "break;"
@@ -125,7 +133,14 @@ public class RedissonFairLock extends RedissonLock implements RLock {
                         + "break;"
                     + "end; "
                   + "end;"
-                    + 
+                    // 1. exists anyLock,锁不存在，也就是没人加锁，刚开始因为第一个客户端进来，之前肯定是没有人加锁的，这个条件是成立的
+                    // 1. exists redisson_lock_queue:{anyLock}这个队列不存在，或者lindex redisson_lock_queue:{anyLock} 0 这个队列中的第一个元素是UUID:threadId ，
+                    // 这个队列存在，但是排在这个队列的第一个元素是当前线程，那么此时这个条件就会成立。
+                    // 第一个客户端进来的时候，其实anyLock和队列redisson_lock_queue:{anyLock}都是不存在的，所以条件是成立的
+
+                    // 2. exists anyLock 是否存在，这个时候肯定已经存在了，所以这里的if 判断条件不成立
+                    // 3. 第三个客户端进行条件判断，和第二个客户端是一样的，条件不成立
+                    +
                         "if (redis.call('exists', KEYS[1]) == 0) and ((redis.call('exists', KEYS[2]) == 0) "
                             + "or (redis.call('lindex', KEYS[2], 0) == ARGV[2])) then " +
                             "redis.call('lpop', KEYS[2]); " +
