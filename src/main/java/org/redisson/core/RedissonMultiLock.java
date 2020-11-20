@@ -148,11 +148,20 @@ public class RedissonMultiLock implements Lock {
         if (waitTime != -1) {
             remainTime = unit.toMillis(waitTime);
         }
+        /**
+         * 1. 允许加锁失败节点个数限制（N-(N/2+1)）
+         */
         int failedLocksLimit = failedLocksLimit();
+        /**
+         * 2. 遍历所有节点通过EVAL命令执行lua加锁
+         */
         List<RLock> lockedLocks = new ArrayList<RLock>(locks.size());
         for (ListIterator<RLock> iterator = locks.listIterator(); iterator.hasNext();) {
             RLock lock = iterator.next();
             boolean lockAcquired;
+            /**
+             *  3.对节点尝试加锁
+             */
             try {
                 if (waitTime == -1 && leaseTime == -1) {
                     lockAcquired = lock.tryLock();
@@ -160,17 +169,26 @@ public class RedissonMultiLock implements Lock {
                     lockAcquired = lock.tryLock(unit.convert(remainTime, TimeUnit.MILLISECONDS), newLeaseTime, unit);
                 }
             } catch (Exception e) {
+               // 抛出异常表示获取锁失败
                lockAcquired = false;
             }
             
             if (lockAcquired) {
                 lockedLocks.add(lock);
             } else {
+                /**
+                 * 5. 计算已经申请锁失败的节点是否已经到达 允许加锁失败节点个数限制 （N-(N/2+1)）
+                 * 如果已经到达， 就认定最终申请锁失败，则没有必要继续从后面的节点申请了
+                 * 因为 Redlock 算法要求至少N/2+1 个节点都加锁成功，才算最终的锁申请成功
+                 */
                 if (locks.size() - lockedLocks.size() == failedLocksLimit()) {
                     break;
                 }
                 if (failedLocksLimit == 0) {
                     unlockInner(lockedLocks);
+                    /**
+                     * 6.计算 目前从各个节点获取锁已经消耗的总时间，如果已经等于最大等待时间，则认定最终申请锁失败，返回false
+                     */
                     if (waitTime == -1 && leaseTime == -1) {
                         return false;
                     }
@@ -206,7 +224,10 @@ public class RedissonMultiLock implements Lock {
                 rFuture.syncUninterruptibly();
             }
         }
-        
+
+        /**
+         * 7.如果逻辑正常执行完则认为最终申请锁成功，返回true
+         */
         return true;
     }
 

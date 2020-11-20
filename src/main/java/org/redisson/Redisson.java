@@ -78,7 +78,7 @@ import org.redisson.core.RTopic;
 import io.netty.util.concurrent.Future;
 
 /**
- * Main infrastructure class allows to get access
+ * Main infrastructure（基础设施）class allows to get access
  * to all Redisson objects on top of Redis server.
  *
  * @author Nikita Koksharov
@@ -364,6 +364,12 @@ public class Redisson implements RedissonClient {
 
     @Override
     public RLock getLock(String name) {
+        /**
+         * 构造并返回一个 RedissonLock 对象
+         * commandExecutor: 与 Redis 节点通信并发送指令的真正实现。需要说明一下，CommandExecutor 实现是通过 eval 命令来执行 Lua 脚本
+         * name: 锁的全局名称
+         * id: Redisson 客户端唯一标识，实际上就是一个 UUID.randomUUID()
+         */
         return new RedissonLock(commandExecutor, name, id);
     }
 

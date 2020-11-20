@@ -239,32 +239,61 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     <T> Future<T> tryLockInnerAsync(long leaseTime, TimeUnit unit, long threadId, RedisStrictCommand<T> command) {
         internalLockLeaseTime = unit.toMillis(leaseTime);
 
+        /**
+         * 通过 EVAL 命令执行 Lua 脚本获取锁，保证了原子性
+         */
         return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, command,
+                // 1.如果缓存中的key不存在，则执行 hset 命令(hset key UUID+threadId 1),然后通过 pexpire 命令设置锁的过期时间(即锁的租约时间)
+                // 返回空值 nil ，表示获取锁成功
                   "if (redis.call('exists', KEYS[1]) == 0) then " +
                       "redis.call('hset', KEYS[1], ARGV[2], 1); " +
                       "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                       "return nil; " +
                   "end; " +
+                 // 如果key已经存在，并且value也匹配，表示是当前线程持有的锁，则执行 hincrby 命令，重入次数加1，并且设置失效时间
                   "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
                       "redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
                       "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                       "return nil; " +
                   "end; " +
+                 //如果key已经存在，但是value不匹配，说明锁已经被其他线程持有，通过 pttl 命令获取锁的剩余存活时间并返回，至此获取锁失败
                   "return redis.call('pttl', KEYS[1]);",
-                    Collections.<Object>singletonList(getName()), internalLockLeaseTime, getLockName(threadId));
+                 //这三个参数分别对应KEYS[1]，ARGV[1]和ARGV[2]
+                /**
+                 * 参数说明：
+                 *
+                 * KEYS[1]就是Collections.singletonList(getName())，表示分布式锁的key；
+                 *
+                 * ARGV[1]就是internalLockLeaseTime，即锁的租约时间（持有锁的有效时间），默认30s；
+                 *
+                 * ARGV[2]就是getLockName(threadId)，是获取锁时set的唯一值 value，即UUID+threadId。
+                 *
+                 */
+                 Collections.<Object>singletonList(getName()), internalLockLeaseTime, getLockName(threadId));
     }
 
     @Override
     public boolean tryLock(long waitTime, long leaseTime, TimeUnit unit) throws InterruptedException {
+        //取得最大等待时间
         long time = unit.toMillis(waitTime);
+        //尝试申请锁，返回还剩余的锁过期时间
         Long ttl = tryAcquire(leaseTime, unit);
         // lock acquired
+        //如果为空，表示申请锁成功
         if (ttl == null) {
             return true;
         }
 
+        //取得当前线程id（判断是否可重入锁的关键）
         final long threadId = Thread.currentThread().getId();
+        /**
+         * 订阅锁释放事件，并通过await方法阻塞等待锁释放，有效的解决了无效的锁申请浪费资源的问题：
+         * 基于信息量，当锁被其它资源占用时，当前线程通过 Redis 的 channel 订阅锁的释放事件，一旦锁释放会发消息通知待等待的线程进行竞争
+         * 当 this.await返回false，说明等待时间已经超出获取锁最大等待时间，取消订阅并返回获取锁失败
+         * 当 this.await返回true，进入循环尝试获取锁
+         */
         Future<RedissonLockEntry> future = subscribe(threadId);
+        //await 方法内部是用CountDownLatch来实现阻塞，获取subscribe异步执行的结果（应用了Netty 的 Future）
         if (!await(future, time, TimeUnit.MILLISECONDS)) {
             if (!future.cancel(false)) {
                 future.addListener(new FutureListener<RedissonLockEntry>() {
@@ -281,21 +310,27 @@ public class RedissonLock extends RedissonExpirable implements RLock {
 
         try {
             while (true) {
+                // 再次尝试申请锁
                 ttl = tryAcquire(leaseTime, unit);
                 // lock acquired
+                // 成功获取锁则直接返回true结束循环
                 if (ttl == null) {
                     return true;
                 }
 
+                //超过最大等待时间则返回false结束循环，获取锁失败
                 if (time <= 0) {
                     return false;
                 }
 
                 // waiting for message
+                //阻塞等待锁（通过信号量(共享锁)阻塞,等待解锁消息）
                 long current = System.currentTimeMillis();
                 if (ttl >= 0 && ttl < time) {
+                    //如果剩余时间(ttl)小于wait time ,就在 ttl 时间内，从Entry的信号量获取一个许可(除非被中断或者一直没有可用的许可)。
                     getEntry(threadId).getLatch().tryAcquire(ttl, TimeUnit.MILLISECONDS);
                 } else {
+                    //则就在wait time 时间范围内等待可以通过信号量
                     getEntry(threadId).getLatch().tryAcquire(time, TimeUnit.MILLISECONDS);
                 }
 
@@ -303,6 +338,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                 time -= elapsed;
             }
         } finally {
+            //无论是否获得锁,都要取消订阅解锁消息
             unsubscribe(future, threadId);
         }
 //        return get(tryLockAsync(waitTime, leaseTime, unit));
