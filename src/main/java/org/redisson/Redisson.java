@@ -379,10 +379,9 @@ public class Redisson implements RedissonClient {
     @Override
     public RLock getLock(String name) {
         /**
-         * 构造并返回一个 RedissonLock 对象
-         * commandExecutor: 与 Redis 节点通信并发送指令的真正实现。需要说明一下，CommandExecutor 实现是通过 eval 命令来执行 Lua 脚本
-         * name: 锁的全局名称
-         * id: Redisson 客户端唯一标识，实际上就是一个 UUID.randomUUID()
+         * commandExecutor: 与 Redis 节点通信并发送指令的真正实现。需要说明一下，Redisson 缺省的 CommandExecutor 实现是通过 eval 命令来执行 Lua 脚本，所以要求 Redis 的版本必须为 2.6 或以上，否则你可能要自己来实现 CommandExecutor。关于 Redisson 的 CommandExecutor 以后会专门解读，所以本次就不多说了。
+         * name: 锁的全局名称，例如上面代码中的 "foobar"，具体业务中通常可能使用共享资源的唯一标识作为该名称。
+         * id: Redisson 客户端唯一标识，实际上就是一个 UUID.randomUUID()。
          */
         return new RedissonLock(commandExecutor, name, id);
     }
