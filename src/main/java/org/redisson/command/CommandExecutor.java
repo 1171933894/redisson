@@ -20,6 +20,7 @@ package org.redisson.command;
  * @author Nikita Koksharov
  *
  */
+// 可以看到它同时继承了 同步和异步(sync/async) 两种调用方式
 public interface CommandExecutor extends CommandSyncExecutor, CommandAsyncExecutor {
 
 }
