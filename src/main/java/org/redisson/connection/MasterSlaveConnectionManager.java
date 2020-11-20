@@ -144,7 +144,7 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
     
     {
         for (int i = 0; i < locks.length; i++) {
-            locks[i] = new AsyncSemaphore(1);
+            locks[i] = new AsyncSemaphore(1);// 初始化信号量
         }
     }
 

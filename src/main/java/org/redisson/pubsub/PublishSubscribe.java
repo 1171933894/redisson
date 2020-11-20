@@ -58,9 +58,15 @@ abstract class PublishSubscribe<E extends PubSubEntry<E>> {
         return entries.get(entryName);
     }
 
+    /*
+     * @param entryName     格式：“id:name”
+     * @param channelName   格式：“redisson_lock__channel:{name}”
+     * @return
+     */
     public Future<E> subscribe(final String entryName, final String channelName, final ConnectionManager connectionManager) {
+        //每一个尝试获取锁失败的线程都会创建一个listenerHolder和一个newPromise，所以这里的listenerHolder、newPromise是与当前获取锁的线程绑定的
         final AtomicReference<Runnable> listenerHolder = new AtomicReference<Runnable>();
-        final AsyncSemaphore semaphore = connectionManager.getSemaphore(channelName);
+        final AsyncSemaphore semaphore = connectionManager.getSemaphore(channelName);// 对于同一个锁，semaphore为单例
         final Promise<E> newPromise = new PromiseDelegator<E>(connectionManager.<E>newPromise()) {
             @Override
             public boolean cancel(boolean mayInterruptIfRunning) {
@@ -68,6 +74,7 @@ abstract class PublishSubscribe<E extends PubSubEntry<E>> {
             }
         };
 
+        //每一个尝试获取锁失败的线程都会创建一个listener
         Runnable listener = new Runnable() {
 
             @Override

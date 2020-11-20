@@ -59,8 +59,8 @@ public interface RLock extends Lock, RExpirable {
      * it is held until <code>unlock</code> is invoked, or until <code>leaseTime</code>
      * have passed since the lock was granted - whichever comes first.
      *
-     * @param waitTime the maximum time to aquire the lock
-     * @param leaseTime
+     * @param waitTime the maximum time to aquire the lock 请求获得锁的时间
+     * @param leaseTime 得到锁后开始，释放该锁的时间
      * @param unit
      * @return
      * @throws InterruptedException
@@ -112,7 +112,7 @@ public interface RLock extends Lock, RExpirable {
      *
      * @return holds or <code>0</code> if this lock is not held by current thread
      */
-    int getHoldCount();
+    int getHoldCount();// 可重入锁的计算
 
     Future<Boolean> forceUnlockAsync();
     

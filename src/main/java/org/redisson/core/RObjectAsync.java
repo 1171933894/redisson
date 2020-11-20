@@ -34,10 +34,10 @@ public interface RObjectAsync {
      * @param database - destination database
      * @return
      */
-    Future<Void> migrateAsync(String host, int port, int database);
+    Future<Void> migrateAsync(String host, int port, int database);// migrate：迁移
 
     /**
-     * Move object to another database in async mode
+     * Move object to another database in async（异步的）mode
      *
      * @param database
      * @return <code>true</code> if key was moved <code>false</code> if not

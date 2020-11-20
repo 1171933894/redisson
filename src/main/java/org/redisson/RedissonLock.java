@@ -135,7 +135,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
          */
         long threadId = Thread.currentThread().getId();
         Future<RedissonLockEntry> future = subscribe(threadId);
-        get(future);
+        get(future);// 这不是阻塞的，必须等到订阅完成才能继续执行
 
         /**
          * 订阅锁的释放消息成功后，进入一个不断重试获取锁的循环，循环中每次都先试着获取锁，并得到已存在的锁的剩余存活时间
@@ -237,14 +237,14 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     }
 
     private void scheduleExpirationRenewal() {
-        if (expirationRenewalMap.containsKey(getEntryName())) {
+        if (expirationRenewalMap.containsKey(getEntryName())) {// getEntryName() -> id + ":" + getName()
             return;
         }
 
         Timeout task = commandExecutor.getConnectionManager().newTimeout(new TimerTask() {
             @Override
             public void run(Timeout timeout) throws Exception {
-                Future<Boolean> future = expireAsync(internalLockLeaseTime, TimeUnit.MILLISECONDS);
+                Future<Boolean> future = expireAsync(internalLockLeaseTime, TimeUnit.MILLISECONDS);// 直接用设置的时间重复续期, 知道业务执行完成后删除该key
                 future.addListener(new FutureListener<Boolean>() {
                     @Override
                     public void operationComplete(Future<Boolean> future) throws Exception {
@@ -261,8 +261,9 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                     }
                 });
             }
-        }, internalLockLeaseTime / 3, TimeUnit.MILLISECONDS);
+        }, internalLockLeaseTime / 3, TimeUnit.MILLISECONDS);// 延迟 internalLockLeaseTime / 3 秒执行一次
 
+        // 再校验一次，防止并发
         if (expirationRenewalMap.putIfAbsent(getEntryName(), task) != null) {
             task.cancel();
         }
