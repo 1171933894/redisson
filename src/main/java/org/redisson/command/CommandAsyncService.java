@@ -261,15 +261,21 @@ public class CommandAsyncService implements CommandAsyncExecutor {
     }
 
     private NodeSource getNodeSource(String key) {
+        //通过公式CRC16.crc16(key.getBytes()) % MAX_SLOT
+        //计算出一个字符串key对应的分片在0~16383中哪个分片
         int slot = connectionManager.calcSlot(key);
+        //之前已经将0~16383每个分片对应到唯一的一个MasterSlaveEntry，这里取出来
         MasterSlaveEntry entry = connectionManager.getEntry(slot);
+        //这里将MasterSlaveEntry包装成NodeSource【slot=null,addr=null,redirect=null,entry=MasterSlaveEntry】
         return new NodeSource(entry);
     }
 
     @Override
     public <T, R> Future<R> readAsync(String key, Codec codec, RedisCommand<T> command, Object ... params) {
         Promise<R> mainPromise = connectionManager.newPromise();
+        //获取NodeSource【slot=null,addr=null,redirect=null,entry=MasterSlaveEntry】
         NodeSource source = getNodeSource(key);
+        //调用异步执行方法async
         async(true, source, codec, command, params, mainPromise, 0);
         return mainPromise;
     }
@@ -408,10 +414,12 @@ public class CommandAsyncService implements CommandAsyncExecutor {
 
     protected <V, R> void async(final boolean readOnlyMode, final NodeSource source, final Codec codec,
                                     final RedisCommand<V> command, final Object[] params, final Promise<R> mainPromise, final int attempt) {
+        //操作被取消，那么直接返回
         if (mainPromise.isCancelled()) {
             return;
         }
 
+        //连接管理器无法连接，释放参数所占资源，然后返回
         if (!connectionManager.getShutdownLatch().acquire()) {
             mainPromise.setFailure(new RedissonShutdownException("Redisson is shutdown"));
             return;
@@ -419,17 +427,22 @@ public class CommandAsyncService implements CommandAsyncExecutor {
 
         final Promise<R> attemptPromise = connectionManager.newPromise();
 
+        //开始从connectionManager获取池中的连接
+        //这里采用异步方式，创建一个RFuture对象，等待池中连接，一旦获得连接，然后进行读和写操作
         final Future<RedisConnection> connectionFuture;
-        if (readOnlyMode) {
+        if (readOnlyMode) {//对于读操作默认readOnlyMode=true,这里会执行
             connectionFuture = connectionManager.connectionReadOp(source, command);
-        } else {
+        } else {//对于写操作默认readOnlyMode=false,这里会执行
             connectionFuture = connectionManager.connectionWriteOp(source, command);
         }
 
+        //创建RPromise，用于操作失败时候重试
         final AsyncDetails<V, R> details = AsyncDetails.acquire();
+        //创建FutureListener，监测外部请求是否已经取消了之前提交的读写操作，如果取消了，那么就让正在执行的读写操作停止
         details.init(connectionFuture, attemptPromise,
                 readOnlyMode, source, codec, command, params, mainPromise, attempt);
 
+        //创建TimerTask，用于操作失败后通过定时器进行操作重试
         final TimerTask retryTimerTask = new TimerTask() {
 
             @Override

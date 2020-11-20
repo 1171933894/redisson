@@ -42,6 +42,10 @@ import io.netty.util.concurrent.Promise;
  * @author Nikita Koksharov
  *
  */
+
+/**
+ * ConnectionManager.java是一个接口类，它有6个实现类，分别对应着不同的部署模式(主从模式、单机模式、哨兵模式、集群模式、亚马逊云模式、微软云模式)
+ */
 public interface ConnectionManager {
     
     URI getLastClusterNode();

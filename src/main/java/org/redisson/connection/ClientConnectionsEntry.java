@@ -119,6 +119,9 @@ public class ClientConnectionsEntry {
         freeConnectionsCounter.release();
     }
 
+    /**
+     *  ClientConnectionsEntry里从freeConnections里获取一个连接并返回给读写操作使用
+     */
     public RedisConnection pollConnection() {
         return freeConnections.poll();
     }
@@ -128,7 +131,11 @@ public class ClientConnectionsEntry {
         freeConnections.add(connection);
     }
 
+    /**
+     *  ClientConnectionsEntry里新创建一个连接对象返回给读写操作使用
+     */
     public Future<RedisConnection> connect() {
+        //调用RedisClient利用netty连接redis服务端，将返回的netty的outboundchannel包装成RedisConnection并返回
         final Promise<RedisConnection> connectionFuture = connectionManager.newPromise();
         Future<RedisConnection> future = client.connectAsync();
         future.addListener(new FutureListener<RedisConnection>() {

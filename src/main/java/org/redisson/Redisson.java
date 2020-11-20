@@ -93,29 +93,37 @@ public class Redisson implements RedissonClient {
 
     protected final UUID id = UUID.randomUUID();
 
+    /**
+     * Redisson构造方法
+     */
     protected Redisson(Config config) {
+        //赋值变量config
         this.config = config;
+        //产生一份对于传入config的备份
         Config configCopy = new Config(config);
-        
-        if (configCopy.getMasterSlaveServersConfig() != null) {
+
+        //根据配置config的类型(主从模式、单机模式、哨兵模式、集群模式、亚马逊云模式、微软云模式)而进行不同的初始化
+        if (configCopy.getMasterSlaveServersConfig() != null) {//配置configCopy类型为主从模式
             validate(configCopy.getMasterSlaveServersConfig());
             connectionManager = new MasterSlaveConnectionManager(configCopy.getMasterSlaveServersConfig(), configCopy);
-        } else if (configCopy.getSingleServerConfig() != null) {
+        } else if (configCopy.getSingleServerConfig() != null) {//配置configCopy类型为单机模式
             validate(configCopy.getSingleServerConfig());
             connectionManager = new SingleConnectionManager(configCopy.getSingleServerConfig(), configCopy);
-        } else if (configCopy.getSentinelServersConfig() != null) {
+        } else if (configCopy.getSentinelServersConfig() != null) {//配置configCopy类型为哨兵模式
             validate(configCopy.getSentinelServersConfig());
             connectionManager = new SentinelConnectionManager(configCopy.getSentinelServersConfig(), configCopy);
-        } else if (configCopy.getClusterServersConfig() != null) {
+        } else if (configCopy.getClusterServersConfig() != null) {//配置configCopy类型为集群模式
             validate(configCopy.getClusterServersConfig());
             connectionManager = new ClusterConnectionManager(configCopy.getClusterServersConfig(), configCopy);
-        } else if (configCopy.getElasticacheServersConfig() != null) {
+        } else if (configCopy.getElasticacheServersConfig() != null) {//配置configCopy类型为亚马逊云模式
             validate(configCopy.getElasticacheServersConfig());
             connectionManager = new ElasticacheConnectionManager(configCopy.getElasticacheServersConfig(), configCopy);
         } else {
             throw new IllegalArgumentException("server(s) address(es) not defined!");
         }
+        //一个持有MasterSlaveConnectionManager的异步执行服务
         commandExecutor = new CommandSyncService(connectionManager);
+        //连接池对象回收调度器
         evictionScheduler = new EvictionScheduler(commandExecutor);
     }
 
@@ -157,7 +165,13 @@ public class Redisson implements RedissonClient {
      * @param config
      * @return Redisson instance
      */
+    /**
+     * 根据配置Config创建redisson操作类RedissonClient
+     * @param config for Redisson
+     * @return Redisson instance
+     */
     public static RedissonClient create(Config config) {
+        //调用构造方法
         return new Redisson(config);
     }
 

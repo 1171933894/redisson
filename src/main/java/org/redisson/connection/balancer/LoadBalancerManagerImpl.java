@@ -46,14 +46,29 @@ public class LoadBalancerManagerImpl implements LoadBalancerManager {
     private final PubSubConnectionPool pubSubConnectionPool;
     private final SlaveConnectionPool slaveConnectionPool;
 
+    /**
+     * LoadBalancerManager的构造方法
+     * @param config for MasterSlaveServersConfig
+     * @param connectionManager for ConnectionManager
+     * @param entry for MasterSlaveEntry
+     */
     public LoadBalancerManagerImpl(MasterSlaveServersConfig config, ConnectionManager connectionManager, MasterSlaveEntry entry) {
+        //赋值connectionManager
         this.connectionManager = connectionManager;
+        //创建连接池SlaveConnectionPool
         slaveConnectionPool = new SlaveConnectionPool(config, connectionManager, entry);
+        //创建连接池PubSubConnectionPool
         pubSubConnectionPool = new PubSubConnectionPool(config, connectionManager, entry);
     }
 
+    /**
+     * LoadBalancerManager的连接池SlaveConnectionPool和PubSubConnectionPool里池化对象添加方法，也即池中需要对象时，调用此方法添加
+     * @param entry for ClientConnectionsEntry
+     * @return RFuture<Void>
+     */
     public Future<Void> add(final ClientConnectionsEntry entry) {
         final Promise<Void> result = connectionManager.newPromise();
+        //创建一个回调监听器，在池中对象创建失败时进行2次莫仍尝试
         FutureListener<Void> listener = new FutureListener<Void>() {
             AtomicInteger counter = new AtomicInteger(2);
             @Override
@@ -69,8 +84,10 @@ public class LoadBalancerManagerImpl implements LoadBalancerManager {
             }
         };
 
+        //调用slaveConnectionPool添加RedisConnection对象到池中
         Future<Void> slaveFuture = slaveConnectionPool.add(entry);
         slaveFuture.addListener(listener);
+        //调用pubSubConnectionPool添加RedisPubSubConnection对象到池中
         Future<Void> pubSubFuture = pubSubConnectionPool.add(entry);
         pubSubFuture.addListener(listener);
         return result;

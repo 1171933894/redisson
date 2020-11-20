@@ -53,20 +53,31 @@ abstract class ConnectionPool<T extends RedisConnection> {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
+
+    //维持着连接池对应的redis节点信息
+    //比如1主2从部署MasterConnectionPool里的entries只有一个主节点(192.168.29.24 6379)
+    //比如1主2从部署MasterPubSubConnectionPool里的entries为空，因为SubscriptionMode=SubscriptionMode.SLAVE
+    //比如1主2从部署SlaveConnectionPool里的entries有3个节点(192.168.29.24 6379，192.168.29.24 7000，192.168.29.24 7001，但是注意192.168.29.24 6379冻结属性freezed=true不会参与读操作除非2个从节点全部宕机才参与读操作)
+    //比如1主2从部署PubSubConnectionPool里的entries有2个节点(192.168.29.24 7000，192.168.29.24 7001),因为SubscriptionMode=SubscriptionMode.SLAVE,主节点不会加入
     protected final List<ClientConnectionsEntry> entries = new CopyOnWriteArrayList<ClientConnectionsEntry>();
 
+    //持有者RedissonClient的组件ConnectionManager
     final ConnectionManager connectionManager;
 
+    //持有者RedissonClient的组件ConnectionManager里的MasterSlaveServersConfig
     final MasterSlaveServersConfig config;
 
+    //持有者RedissonClient的组件ConnectionManager里的MasterSlaveEntry
     final MasterSlaveEntry masterSlaveEntry;
 
+    //构造函数
     public ConnectionPool(MasterSlaveServersConfig config, ConnectionManager connectionManager, MasterSlaveEntry masterSlaveEntry) {
         this.config = config;
         this.masterSlaveEntry = masterSlaveEntry;
         this.connectionManager = connectionManager;
     }
 
+    //连接池中需要增加对象时候调用此方法
     public Future<Void> add(final ClientConnectionsEntry entry) {
         final Promise<Void> promise = connectionManager.newPromise();
         promise.addListener(new FutureListener<Void>() {
@@ -79,6 +90,7 @@ abstract class ConnectionPool<T extends RedisConnection> {
         return promise;
     }
 
+    //初始化连接池中最小连接数
     private void initConnections(final ClientConnectionsEntry entry, final Promise<Void> initPromise, boolean checkFreezed) {
         final int minimumIdleSize = getMinimumIdleSize(entry);
 
@@ -95,6 +107,7 @@ abstract class ConnectionPool<T extends RedisConnection> {
         }
     }
 
+    //创建连接对象到连接池中
     private void createConnection(final boolean checkFreezed, final AtomicInteger requests, final ClientConnectionsEntry entry, final Promise<Void> initPromise,
             final int minimumIdleSize, final AtomicInteger initializedConnections) {
 
@@ -159,6 +172,7 @@ abstract class ConnectionPool<T extends RedisConnection> {
         return config.getLoadBalancer().getEntry(entries);
     }
 
+    //连接池中租借出连接对象
     public Future<T> get() {
         for (int j = entries.size() - 1; j >= 0; j--) {
             final ClientConnectionsEntry entry = getEntry();
@@ -197,6 +211,7 @@ abstract class ConnectionPool<T extends RedisConnection> {
         return connectionManager.newFailedFuture(exception);
     }
 
+    //连接池中租借出连接对象执行操作RedisCommand
     public Future<T> get(ClientConnectionsEntry entry) {
         if (((entry.getNodeType() == NodeType.MASTER && entry.getFreezeReason() == FreezeReason.SYSTEM) || !entry.isFreezed())
                 && tryAcquireConnection(entry)) {
@@ -402,11 +417,13 @@ abstract class ConnectionPool<T extends RedisConnection> {
         }, config.getReconnectionTimeout(), TimeUnit.MILLISECONDS);
     }
 
+    //通过向redis服务端发送PING看是否返回PONG来检测连接
     private void ping(RedisConnection c, final FutureListener<String> pingListener) {
         Future<String> f = c.async(RedisCommands.PING);
         f.addListener(pingListener);
     }
 
+    //归还连接对象到连接池
     public void returnConnection(ClientConnectionsEntry entry, T connection) {
         if (entry.isFreezed()) {
             connection.closeAsync();
@@ -416,10 +433,12 @@ abstract class ConnectionPool<T extends RedisConnection> {
         releaseConnection(entry);
     }
 
+    //释放连接池中连接对象
     protected void releaseConnection(ClientConnectionsEntry entry) {
         entry.releaseConnection();
     }
 
+    //释放连接池中连接对象
     protected void releaseConnection(ClientConnectionsEntry entry, T conn) {
         entry.releaseConnection(conn);
     }

@@ -67,27 +67,50 @@ public class MasterSlaveEntry {
 
     final AtomicBoolean active = new AtomicBoolean(true);
 
+    /**
+     * MasterSlaveEntry的构造方法
+     * @param slotRanges for Set<ClusterSlotRange>
+     * @param connectionManager for ConnectionManager
+     * @param config for MasterSlaveServersConfig
+     */
     public MasterSlaveEntry(Set<ClusterSlotRange> slotRanges, ConnectionManager connectionManager, MasterSlaveServersConfig config) {
+        //主从模式下0~16383加入到集合slots
         for (ClusterSlotRange clusterSlotRange : slotRanges) {
             for (int i = clusterSlotRange.getStartSlot(); i < clusterSlotRange.getEndSlot() + 1; i++) {
                 slots.add(i);
             }
         }
+        //赋值MasterSlaveConnectionManager给connectionManager
         this.connectionManager = connectionManager;
-        this.config = config;
+        this.config = config;//赋值config
 
+        //创建LoadBalancerManager
+        //其实LoadBalancerManager里持有者从节点的SlaveConnectionPool和PubSubConnectionPool
+        //并且此时连接池里还没有初始化默认的最小连接数
         slaveBalancer = new LoadBalancerManagerImpl(config, connectionManager, this);
+        //创建主节点连接池MasterConnectionPool，此时连接池里还没有初始化默认的最小连接数
         writeConnectionHolder = new MasterConnectionPool(config, connectionManager, this);
     }
 
+    /**
+     * 从节点连接池SlaveConnectionPool和PubSubConnectionPool的默认的最小连接数初始化
+     * @param disconnectedNodes for Collection<URI>
+     * @return List<RFuture<Void>>
+     */
     public List<Future<Void>> initSlaveBalancer(Collection<URI> disconnectedNodes) {
+        //这里freezeMasterAsSlave=true
         boolean freezeMasterAsSlave = !config.getSlaveAddresses().isEmpty()
                     && config.getReadMode() == ReadMode.SLAVE
                         && disconnectedNodes.size() < config.getSlaveAddresses().size();
 
         List<Future<Void>> result = new LinkedList<Future<Void>>();
+        //把主节点当作从节点处理，因为默认ReadMode=ReadMode.SLAVE,所以这里不会添加针对该节点的连接池
         Future<Void> f = addSlave(config.getMasterAddress().getHost(), config.getMasterAddress().getPort(), freezeMasterAsSlave, NodeType.MASTER);
         result.add(f);
+
+        //读取从节点的地址信息，然后针对每个从节点地址创建SlaveConnectionPool和PubSubConnectionPool
+        //SlaveConnectionPool【初始化10个RedisConnection，最大可以扩展至64个】
+        //PubSubConnectionPool【初始化1个RedisPubSubConnection，最大可以扩展至50个】
         for (URI address : config.getSlaveAddresses()) {
             f = addSlave(address.getHost(), address.getPort(), disconnectedNodes.contains(address), NodeType.SLAVE);
             result.add(f);
@@ -95,6 +118,11 @@ public class MasterSlaveEntry {
         return result;
     }
 
+
+    /**
+     * 主节点连接池MasterConnectionPool和MasterPubSubConnectionPool的默认的最小连接数初始化
+     * @return RFuture<Void>
+     */
     public Future<Void> setupMasterEntry(String host, int port) {
         RedisClient client = connectionManager.createClient(NodeType.MASTER, host, port);
         masterEntry = new ClientConnectionsEntry(client, config.getMasterConnectionMinimumIdleSize(), config.getMasterConnectionPoolSize(),
@@ -298,19 +326,23 @@ public class MasterSlaveEntry {
         return addSlave(host, port, true, NodeType.SLAVE);
     }
 
+    // 从节点连接池SlaveConnectionPool和PubSubConnectionPool的默认的最小连接数初始化
     private Future<Void> addSlave(String host, int port, boolean freezed, NodeType mode) {
+        //创建到从节点的连接RedisClient
         RedisClient client = connectionManager.createClient(NodeType.SLAVE, host, port);
         ClientConnectionsEntry entry = new ClientConnectionsEntry(client,
                 this.config.getSlaveConnectionMinimumIdleSize(),
                 this.config.getSlaveConnectionPoolSize(),
                 this.config.getSlaveSubscriptionConnectionMinimumIdleSize(),
                 this.config.getSlaveSubscriptionConnectionPoolSize(), connectionManager, mode);
+        //默认只有主节点当作从节点是会设置freezed=true
         if (freezed) {
             synchronized (entry) {
                 entry.setFreezed(freezed);
                 entry.setFreezeReason(FreezeReason.SYSTEM);
             }
         }
+        //调用slaveBalancer来对从节点连接池SlaveConnectionPool和PubSubConnectionPool的默认的最小连接数初始化
         return slaveBalancer.add(entry);
     }
 

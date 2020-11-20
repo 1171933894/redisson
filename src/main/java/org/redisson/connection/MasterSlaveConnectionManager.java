@@ -149,15 +149,19 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
     }
 
     public MasterSlaveConnectionManager(MasterSlaveServersConfig cfg, Config config) {
+        //调用构造方法
         this(config);
         init(cfg);
     }
 
     public MasterSlaveConnectionManager(Config cfg) {
+        //读取redisson的jar中的文件META-INF/MANIFEST.MF，打印出Bundle-Version对应的Redisson版本信息
         Version.logVersion();
 
+        //EPOLL是linux的多路复用IO模型的增强版本，这里如果启用EPOLL，就让redisson底层netty使用EPOLL的方式，否则配置netty里的NIO非阻塞方式
         if (cfg.isUseLinuxNativeEpoll()) {
             if (cfg.getEventLoopGroup() == null) {
+                //使用linux IO非阻塞模型EPOLL
                 this.group = new EpollEventLoopGroup(cfg.getThreads());
             } else {
                 this.group = cfg.getEventLoopGroup();
@@ -166,6 +170,7 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
             this.socketChannelClass = EpollSocketChannel.class;
         } else {
             if (cfg.getEventLoopGroup() == null) {
+                //使用linux IO非阻塞模型NIO
                 this.group = new NioEventLoopGroup(cfg.getThreads());
             } else {
                 this.group = cfg.getEventLoopGroup();
@@ -174,6 +179,7 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
             this.socketChannelClass = NioSocketChannel.class;
         }
         this.codec = cfg.getCodec();
+        //一个可以获取异步执行任务返回值的回调对象，本质是对于java的Future的实现，监控MasterSlaveConnectionManager的shutdown进行一些必要的处理
         this.shutdownPromise = newPromise();
     }
 
@@ -202,9 +208,11 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
     protected void init(MasterSlaveServersConfig config) {
         this.config = config;
 
+        //读取超时时间配置信息
         int[] timeouts = new int[]{config.getRetryInterval(), config.getTimeout(), config.getReconnectionTimeout()};
         Arrays.sort(timeouts);
         int minTimeout = timeouts[0];
+        //设置默认超时时间
         if (minTimeout % 100 != 0) {
             minTimeout = (minTimeout % 100) / 2;
         } else if (minTimeout == 100) {
@@ -212,8 +220,10 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
         } else {
             minTimeout = 100;
         }
+        //创建定时调度器
         timer = new HashedWheelTimer(minTimeout, TimeUnit.MILLISECONDS);
 
+        //检测MasterSlaveConnectionManager的空闲连接的监视器IdleConnectionWatcher，会清理不用的空闲的池中连接对象
         connectionWatcher = new IdleConnectionWatcher(this, config);
 
         try {
@@ -229,6 +239,7 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
     }
 
     protected void initEntry(MasterSlaveServersConfig config) {
+        //主从模式下0~16383加入到集合slots
         HashSet<ClusterSlotRange> slots = new HashSet<ClusterSlotRange>();
         slots.add(singleSlotRange);
 
@@ -240,7 +251,8 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
         } else {
             entry = createMasterSlaveEntry(config, slots);
         }
-        
+
+        //将每个分片0~16383都指向创建的MasterSlaveEntry
         for (int slot = singleSlotRange.getStartSlot(); slot < singleSlotRange.getEndSlot() + 1; slot++) {
             addEntry(slot, entry);
         }
@@ -248,11 +260,14 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
 
     protected MasterSlaveEntry createMasterSlaveEntry(MasterSlaveServersConfig config,
             HashSet<ClusterSlotRange> slots) {
+        //创建MasterSlaveEntry
         MasterSlaveEntry entry = new MasterSlaveEntry(slots, this, config);
+        //从节点连接池SlaveConnectionPool和PubSubConnectionPool的默认的最小连接数初始化
         List<Future<Void>> fs = entry.initSlaveBalancer(java.util.Collections.<URI>emptySet());
         for (Future<Void> future : fs) {
             future.syncUninterruptibly();
         }
+        //主节点连接池MasterConnectionPool和MasterPubSubConnectionPool的默认的最小连接数初始化
         Future<Void> f = entry.setupMasterEntry(config.getMasterAddress().getHost(), config.getMasterAddress().getPort());
         f.syncUninterruptibly();
         return entry;
@@ -626,12 +641,20 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
         return entries.remove(slot);
     }
 
+    /**
+     * 写操作通过ConnectionManager从连接池获取连接对象
+     * @param source for NodeSource
+     * @param command for RedisCommand<?>
+     * @return RFuture<RedisConnection>
+     */
     @Override
     public Future<RedisConnection> connectionWriteOp(NodeSource source, RedisCommand<?> command) {
+        //这里之前分析过source=NodeSource【slot=null,addr=null,redirect=null,entry=MasterSlaveEntry】
         MasterSlaveEntry entry = source.getEntry();
-        if (entry == null) {
+        if (entry == null) {//这里不会执行source里entry不等于null
             entry = getEntry(source);
         }
+        //MasterSlaveEntry里从连接池获取连接对象
         return entry.connectionWriteOp();
     }
 
@@ -652,16 +675,23 @@ public class MasterSlaveConnectionManager implements ConnectionManager {
         return e;
     }
 
+    /**
+     * 读操作通过ConnectionManager从连接池获取连接对象
+     * @param source for NodeSource
+     * @param command for RedisCommand<?>
+     * @return RFuture<RedisConnection>
+     */
     @Override
     public Future<RedisConnection> connectionReadOp(NodeSource source, RedisCommand<?> command) {
+        //这里之前分析过source=NodeSource【slot=null,addr=null,redirect=null,entry=MasterSlaveEntry】
         MasterSlaveEntry entry = source.getEntry();
-        if (entry == null && source.getSlot() != null) {
+        if (entry == null && source.getSlot() != null) {//这里不会执行source里slot=null
             entry = getEntry(source.getSlot());
         }
-        if (source.getAddr() != null) {
+        if (source.getAddr() != null) {//这里不会执行source里addr=null
             return entry.connectionReadOp(source.getAddr());
         }
-        return entry.connectionReadOp();
+        return entry.connectionReadOp();//MasterSlaveEntry里从连接池获取连接对象
     }
 
     Future<RedisPubSubConnection> nextPubSubConnection(int slot) {
